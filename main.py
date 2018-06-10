@@ -1,7 +1,8 @@
 import copy
 # import numpy as np
 import time
-
+import random
+import math
 
 class Map:
     def __init__(self, dimention):
@@ -49,6 +50,44 @@ class State:
             position[0] += 1
             # print(*new_cams)
             return State(self.map, new_cams)
+
+    '''
+    0 = left, 1 = up, 2 = right, 3 = down
+    '''
+    def move_camera_on_direction(self,action):
+        camera_num, direction = action
+        new_cams = copy.deepcopy(self.cameras)
+        position = new_cams[camera_num].position
+        dimention = self.map.dimention
+
+        if direction == 0 and position[0] > 0:
+            position[0] -= 1
+        elif direction == 1 and position[1] < dimention[1] - 1:
+            position[1] += 1
+        elif direction == 2 and position[0] < dimention[0] - 1:
+            position[0] += 1
+        elif direction == 3 and position[1] > 0:
+            position[1] -= 1
+
+        return State(self.map, new_cams)
+
+
+    # returns [(camera_num, direction) ... ], with max length 4
+    def get_camera_actions(self,camera_num):
+        actions = []
+        position = self.cameras[camera_num].position
+        dimention = self.map.dimention
+
+        # when not at edge and there is no wall
+        if position[0] > 0 and not self.map.grid[position[0]-1][position[1]][1]:
+            actions.append((camera_num,0))
+        elif position[1] < dimention[1] - 1 and not self.map.grid[position[0]][position[1]+1][1]:
+            actions.append((camera_num, 1))
+        elif position[0] < dimention[0] - 1 and not self.map.grid[position[0]+1][position[1]][1]:
+            actions.append((camera_num, 2))
+        elif position[1] >0 and not self.map.grid[position[0]][position[1]-1][1]:
+            actions.append((camera_num, 3))
+        return actions
 
 #evaluate the achievement of 1 state
 class Evaluator:
@@ -104,8 +143,6 @@ class Evaluator:
 
             if achievement < current_best[0]:
                 return [achievement, copy.deepcopy(cameras)]
-
-
 
         else:
             temp = current_best
@@ -326,6 +363,90 @@ class BFSWithNonDupQueue:
         print('bfs complete!')
         return [self.best_achievement, self.best_setup]
 
+class SimulatedAnnealing:
+    def __init__(self, map, camera_count, alpha=0.8, t_init=0.9, t_final=0.1, iter=1000,debug=True):
+        self.debug = debug
+        self.best_achievement = map.total_priority
+        cameras = self.random_placement(camera_count,map)
+        self.best_setup = cameras
+        self.cameras = cameras
+        self.map = map
+        self.visited_dict = {}
+
+        # Hyper params
+        self.alpha = alpha
+        self.t_init = t_init
+        self.t_final = t_final
+        self.iter = iter
+
+        if self.debug:
+            print("Debugging Simulated Annealing algorithm")
+            print("Setting up SA ... ")
+            print("  Alpha: %f" % alpha)
+            print("  Initial Temperature: %f" % t_init)
+            print("  Final Temperature: %f" % t_final)
+            print("  Number of iteration: %d" % iter)
+            total_iter = iter*(int(math.log(t_final/t_init,alpha)))
+            print("  Number of iteration in total: %d" % total_iter)
+
+    def start(self):
+        init_state = State(self.map, self.cameras)
+        eval = Evaluator()
+        current_state = init_state
+        result = eval.evaluate(current_state)
+        if result[0] == 0: return result
+        temperature = self.t_init
+
+        while temperature > self.t_final:
+            for i in range(0,self.iter):
+                actions = []
+                for i in range(0,len(self.cameras)):
+                    actions += current_state.get_camera_actions(i)
+
+                # if self.debug: print("Count of actions available: %d" % len(actions))
+                # take a random action
+                action_id = random.randint(0,len(actions)-1)
+                nextState = current_state.move_camera_on_direction(actions[action_id])
+                result = eval.evaluate(nextState)
+                if result[0] == 0:
+                    self.best_achievement = result[0]
+                    self.best_setup = result[1]
+                    return result
+                # always take the better result
+                elif result[0] < self.best_achievement:
+                    self.best_achievement = result[0]
+                    self.best_setup = result[1]
+                    if self.debug: print("  Found better achievement: %d" % result[0])
+                    current_state = nextState
+                # if the result is not better
+                else:
+                    if self.random_acception(abs(result[0]-self.best_achievement),temperature):
+                        # if self.debug: print("Accepting a bad move")
+                        current_state = nextState
+
+            # decrement temperature
+            temperature = temperature*self.alpha
+            if self.debug: print("Decreasing temperature to: %f" % temperature)
+
+        return result
+
+    def random_placement(self,camera_count,map):
+        x = map.dimention[0]
+        y = map.dimention[1]
+        cameras = []
+        if self.debug: print("Random placing %d cameras" % camera_count)
+
+        for i in range(0,camera_count):
+            camera = Camera([random.randint(0,x-1), random.randint(0,y-1)],0)
+            cameras.append(camera)
+            if self.debug: print("Camera %d at: %s" % (i+1,camera))
+
+        return cameras
+
+    def random_acception(self,delta_cost,T):
+        prob = math.exp(-delta_cost/T)
+        return random.random() < prob
+
 class DFS:
     def __init__(self, map, cameras):
         self.best_achievement = map.total_priority
@@ -491,9 +612,43 @@ def DFSTest():
     print(result[0])
     print(*result[1])
 
+def run_simulated_annealing():
+    map, cameras = complex_setup()
+    SA = SimulatedAnnealing(map, len(cameras), alpha=0.8, t_init=0.9, t_final=0.1, iter=1000, debug=True)
+    result = SA.start()
+    print(result[0])
+    print(*result[1])
+    return result
+
+def evaluate_SA(n):
+    # run n times, take average runtime in min
+    sum = 0.0
+    best_result = (100,None)
+    results = []
+
+    print("Running SA for %d times" % n)
+    print("")
+
+    for i in range(0,n):
+        start = time.time()
+        result = run_simulated_annealing()
+        end = time.time()
+        runtime = (end - start)/60
+        sum += runtime
+        results.append((result[0],runtime))
+
+    print("")
+    print("*****************************")
+    print("Done running SA for %d times" % n)
+    print("Here is the results: ")
+    for result in results:
+        print("  Achievement: %d, Runtime: %f min" % result)
+        if result[0] < best_result[0]:
+            best_result = result
+    print("*****************************")
+    print("  Average runtime: %f min" % float(sum/1.0*n))
+    print("  Best result: %d with runtime %f min" % best_result)
+    print("*****************************")
 
 if __name__ == '__main__':
-    start = time.time()
-    main()
-    end = time.time()
-    print(str((end - start)/60 ) + " min")
+    evaluate_SA(2)
