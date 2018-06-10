@@ -1,3 +1,7 @@
+'''
+    Usage: python3 main.py
+'''
+
 import copy
 # import numpy as np
 import time
@@ -614,7 +618,7 @@ def DFSTest():
 
 def run_simulated_annealing():
     map, cameras = complex_setup()
-    SA = SimulatedAnnealing(map, len(cameras), alpha=0.8, t_init=0.9, t_final=0.1, iter=1000, debug=True)
+    SA = SimulatedAnnealing(map, len(cameras), alpha=0.5, t_init=20, t_final=0.1, iter=500, debug=True)
     result = SA.start()
     print(result[0])
     print(*result[1])
@@ -651,4 +655,4 @@ def evaluate_SA(n):
     print("*****************************")
 
 if __name__ == '__main__':
-    evaluate_SA(2)
+    evaluate_SA(10)
